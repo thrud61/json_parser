@@ -56,17 +56,21 @@ The exact API is still under development.
 
 ## JSON support
 
-The parser will initially target standard JSON:
+The parser supports the core JSON value types and JSON number/string syntax needed by its configuration-oriented design:
 
 - `null`
 - `true` / `false`
-- numbers
+- integers and floating-point numbers
 - strings
 - arrays
 - objects
-- JSON whitespace and escaping
+- JSON whitespace and the standard simple string escapes
 
-Non-standard extensions such as comments will not be supported unless there is a compelling reason to add them.
+The `\uXXXX` Unicode escape form is currently rejected rather than decoded. Raw UTF-8 bytes in strings are not interpreted by the parser and are retained as input bytes.
+
+Duplicate object member names are permitted. When looking up a member by name, the first matching member is returned.
+
+Non-standard extensions such as comments are not supported.
 
 ## Resource limits
 
@@ -79,6 +83,23 @@ json::document<64, 8> doc;
 ```
 
 can represent at most 64 JSON values and eight levels of nesting. Exceeding either limit is a parse error.
+
+Parsing is recursive, so `MaxDepth` also bounds parser recursion. Setting it to a very large value increases stack usage accordingly.
+
+Floating-point values are converted using bounded decimal processing rather than locale-dependent conversion routines. Results that cannot be represented as a finite `double` are rejected as `invalid_number`.
+
+## API behaviour
+
+`document::value` is a lightweight, non-owning handle. Missing object members and out-of-range array elements produce an invalid value, which can be tested with:
+
+```cpp
+if (!doc.root()["missing"])
+    // member was not present
+```
+
+`operator bool()` is the validity check. Other `value` accessors assume the handle is valid.
+
+A failed parse may leave a partial document; the document must not be used unless the parse operation succeeds.
 
 ## Status
 
