@@ -194,6 +194,67 @@ void test_invalid_numbers()
     }
 }
 
+void test_capacity_limits()
+{
+    // The root array plus its three elements uses exactly four values.
+    char exact_input[] = "[1, 2, 3]";
+    json::document<4, 1> exact_document;
+
+    const auto exact_result =
+        json::parse(exact_input, std::strlen(exact_input), exact_document);
+
+    assert(exact_result);
+    assert(exact_document.value_count() == 4);
+    assert(exact_document.root().size() == 3);
+
+    // The fourth element requires a fifth value and must exceed the limit.
+    char over_input[] = "[1, 2, 3, 4]";
+    json::document<4, 1> over_document;
+
+    const auto over_result =
+        json::parse(over_input, std::strlen(over_input), over_document);
+
+    assert(!over_result);
+    assert(over_result.code == json::error::capacity_exceeded);
+
+    // Empty containers still consume one value each.
+    char empty_input[] = "{}";
+    json::document<1, 1> empty_document;
+
+    const auto empty_result =
+        json::parse(empty_input, std::strlen(empty_input), empty_document);
+
+    assert(empty_result);
+    assert(empty_document.value_count() == 1);
+    assert(empty_document.root().is_object());
+    assert(empty_document.root().size() == 0);
+}
+
+void test_depth_limits()
+{
+    // The root container is at depth zero, so one level of nesting is
+    // permitted with MaxDepth == 1.
+    char exact_input[] = "[0]";
+    json::document<2, 1> exact_document;
+
+    const auto exact_result =
+        json::parse(exact_input, std::strlen(exact_input), exact_document);
+
+    assert(exact_result);
+    assert(exact_document.root().is_array());
+    assert(exact_document.root().size() == 1);
+
+    // A nested container reaches depth one and must exceed MaxDepth == 1.
+    char over_input[] = "[[0]]";
+    json::document<3, 1> over_document;
+
+    const auto over_result =
+        json::parse(over_input, std::strlen(over_input), over_document);
+
+    assert(!over_result);
+    assert(over_result.code == json::error::nesting_limit);
+}
+
 void test_invalid_json()
 {
     char input[] = R"json({
@@ -217,6 +278,8 @@ int main()
     test_cmake_settings();
     test_numeric_values();
     test_invalid_numbers();
+    test_capacity_limits();
+    test_depth_limits();
     test_invalid_json();
 
     return 0;
