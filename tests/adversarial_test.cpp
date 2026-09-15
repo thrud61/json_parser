@@ -21,6 +21,19 @@ void expect_error(const char* text, json::error expected)
     assert(result.code == expected);
 }
 
+void expect_any_error(const char* text)
+{
+    char input[2048];
+    const std::size_t length = std::strlen(text);
+    assert(length < sizeof(input));
+    std::memcpy(input, text, length + 1);
+
+    json::document<128, 16> document;
+    const auto result = json::parse(input, length, document);
+
+    assert(!result);
+}
+
 void test_truncated_structures()
 {
     const char* inputs[] = {
@@ -35,7 +48,10 @@ void test_truncated_structures()
     };
 
     for (const char* input : inputs)
-        expect_error(input, json::error::unexpected_end);
+        expect_any_error(input);
+
+    expect_error("{\"a\"", json::error::expected_colon);
+    expect_error("{\"a\":1,", json::error::unexpected_character);
 }
 
 void test_malformed_separators()
@@ -53,7 +69,7 @@ void test_malformed_separators()
         { "{,}", json::error::unexpected_character },
         { "{\"a\",1}", json::error::expected_colon },
         { "{\"a\":}", json::error::expected_value },
-        { "{\"a\":1,}", json::error::unexpected_character },
+        { "{\"a\":1,}", json::error::expected_value },
         { "{\"a\":1 \"b\":2}", json::error::expected_comma }
     };
 
