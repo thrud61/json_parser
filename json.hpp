@@ -15,6 +15,13 @@
 
 namespace json {
 
+/**
+ * @brief Non-owning reference to a string in the input buffer.
+ *
+ * String contents are decoded in-place by the parser. The referenced
+ * storage is owned by the caller and must remain valid while the
+ * reference is used.
+ */
 struct string_ref
 {
     const char* data;
@@ -24,6 +31,7 @@ struct string_ref
     const char* end() const { return data + size; }
 };
 
+/** @brief JSON value types supported by the parser. */
 enum class value_type : std::uint8_t
 {
     null,
@@ -35,6 +43,7 @@ enum class value_type : std::uint8_t
     object
 };
 
+/** @brief Errors that can be reported by the parser. */
 enum class error : std::uint8_t
 {
     none,
@@ -50,6 +59,12 @@ enum class error : std::uint8_t
     capacity_exceeded
 };
 
+/**
+ * @brief Result returned by a parse operation.
+ *
+ * On failure, @c code identifies the error and @c offset identifies
+ * its position in the input buffer.
+ */
 struct parse_result
 {
     error code = error::none;
@@ -61,6 +76,15 @@ struct parse_result
     }
 };
 
+/**
+ * @brief Fixed-capacity parsed JSON document.
+ *
+ * @tparam MaxValues Maximum number of JSON values stored in the document.
+ * @tparam MaxDepth Maximum object/array nesting depth.
+ *
+ * The document owns no dynamic memory. String values refer directly to
+ * the caller-provided input buffer.
+ */
 template <std::size_t MaxValues, std::size_t MaxDepth>
 class document
 {
@@ -94,6 +118,12 @@ class document
     std::size_t value_count_;
 
 public:
+    /**
+     * @brief Lightweight handle used to access a value in a document.
+     *
+     * A value does not own the underlying JSON data. It remains valid only
+     * while the associated document and its input buffer remain valid.
+     */
     class value
     {
         friend class document;
@@ -114,6 +144,7 @@ public:
     public:
         value() : document_(nullptr), index_(invalid_index) {}
 
+        /** @brief Return whether this handle refers to a parsed value. */
         explicit operator bool() const
         {
             return document_ != nullptr && index_ != invalid_index;
@@ -195,13 +226,16 @@ public:
 
     document() : values_{}, value_count_(0) {}
 
+    /** @brief Remove all values from the document. */
     void clear()
     {
         value_count_ = 0;
     }
 
+    /** @brief Return the number of values currently stored. */
     std::size_t value_count() const { return value_count_; }
 
+    /** @brief Return a handle to the root value, or an invalid value if empty. */
     value root() const
     {
         return value_count_ == 0 ? value() : value(this, 0);
@@ -229,6 +263,12 @@ private:
 template <std::size_t MaxValues, std::size_t MaxDepth>
 class parser;
 
+/**
+ * @brief Parser for a fixed-capacity JSON document.
+ *
+ * The parser uses the caller-provided writable input buffer for in-place
+ * string decoding and performs no dynamic allocation.
+ */
 template <std::size_t MaxValues, std::size_t MaxDepth>
 class parser
 {
