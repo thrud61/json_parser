@@ -9,6 +9,7 @@
 #ifndef JSON_HPP
 #define JSON_HPP
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -123,6 +124,9 @@ public:
      *
      * A value does not own the underlying JSON data. It remains valid only
      * while the associated document and its input buffer remain valid.
+     *
+     * An invalid value may be tested with @c operator bool(). Other accessors
+     * require a valid value handle.
      */
     class value
     {
@@ -268,6 +272,10 @@ class parser;
  *
  * The parser uses the caller-provided writable input buffer for in-place
  * string decoding and performs no dynamic allocation.
+ *
+ * Parsing is recursive. @c MaxDepth therefore bounds both JSON nesting and
+ * the parser's recursion depth; very large values of @c MaxDepth increase
+ * stack usage accordingly.
  */
 template <std::size_t MaxValues, std::size_t MaxDepth>
 class parser
@@ -572,7 +580,9 @@ private:
         double value = 0.0;
         std::size_t significant_digits = 0;
         std::size_t fractional_digits = 0;
-        int decimal_exponent = exponent_negative ? -exponent : exponent;
+        std::int64_t decimal_exponent = exponent_negative
+            ? -static_cast<std::int64_t>(exponent)
+            : static_cast<std::int64_t>(exponent);
 
         char* p = integer_start;
         while (p != current_ && *p != '.' && *p != 'e' && *p != 'E')
@@ -604,13 +614,13 @@ private:
             }
         }
 
-        if (fractional_digits > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+        if (fractional_digits > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()))
         {
             last_error_ = fail(error::invalid_number);
             return invalid_index;
         }
 
-        decimal_exponent -= static_cast<int>(fractional_digits);
+        decimal_exponent -= static_cast<std::int64_t>(fractional_digits);
 
         if (value == 0.0)
         {
@@ -625,12 +635,12 @@ private:
         }
 
         double power = 10.0;
-        int magnitude_exponent = decimal_exponent < 0
-            ? -decimal_exponent
-            : decimal_exponent;
+        std::uint64_t magnitude_exponent = decimal_exponent < 0
+            ? static_cast<std::uint64_t>(-decimal_exponent)
+            : static_cast<std::uint64_t>(decimal_exponent);
         while (magnitude_exponent != 0)
         {
-            if ((magnitude_exponent & 1) != 0)
+            if ((magnitude_exponent & 1u) != 0)
             {
                 if (decimal_exponent < 0)
                     value /= power;
@@ -640,6 +650,12 @@ private:
             magnitude_exponent >>= 1;
             if (magnitude_exponent != 0)
                 power *= power;
+        }
+
+        if (!std::isfinite(value))
+        {
+            last_error_ = fail(error::invalid_number);
+            return invalid_index;
         }
 
         if (negative)
