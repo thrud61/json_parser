@@ -16,6 +16,8 @@
 
 namespace json {
 
+auto dummy = 0;
+
 /**
  * @brief Non-owning reference to a string in the input buffer.
  *
@@ -146,6 +148,12 @@ public:
     public:
         value() : document_(nullptr), index_(invalid_index) {}
 
+        /** @brief Return whether this handle refers to a parsed value. */
+        explicit operator bool() const
+        {
+            return document_ != nullptr && index_ != invalid_index;
+        }
+
         value_type type() const { return node_ref().type; }
 
         bool is_null() const { return type() == value_type::null; }
@@ -256,6 +264,9 @@ private:
     }
 };
 
+template <std::size_t MaxValues, std::size_t MaxDepth>
+class parser;
+
 /**
  * @brief Parser for a fixed-capacity JSON document.
  *
@@ -275,18 +286,11 @@ class parser
     document_type& document_;
 
 public:
-    /**
-     * @brief Construct a parser for a writable input buffer.
-     * @param buffer Input JSON buffer. The parser modifies string contents in-place.
-     * @param size Number of bytes in @p buffer.
-     * @param document Document into which parsed values are stored.
-     */
     parser(char* buffer, std::size_t size, document_type& document)
         : begin_(buffer), current_(buffer), end_(buffer + size), document_(document)
     {
     }
 
-    /** @brief Parse the input buffer and return the result. */
     parse_result parse()
     {
         document_.clear();
@@ -378,7 +382,7 @@ private:
 
     index_type parse_string()
     {
-        ++current_; // opening quote
+        ++current_;
         char* output = current_;
         char* start = output;
 
@@ -428,7 +432,6 @@ private:
             case 'r': *output++ = '\r'; break;
             case 't': *output++ = '\t'; break;
             case 'u':
-                // Unicode decoding will be added with surrogate-pair handling.
                 last_error_ = fail(error::invalid_string);
                 return invalid_index;
             default:
@@ -511,8 +514,6 @@ private:
                 return invalid_index;
             }
 
-            // Clamp the exponent. Values beyond this range are already
-            // guaranteed to overflow or underflow a double.
             while (current_ != end_ && *current_ >= '0' && *current_ <= '9')
             {
                 const int digit = *current_ - '0';
@@ -528,8 +529,6 @@ private:
 
         if (!floating)
         {
-            // Accumulate the magnitude and check for signed 64-bit overflow.
-            // The negative limit is one larger in magnitude than INT64_MAX.
             const std::uint64_t max_integer =
                 static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
             const std::uint64_t limit = negative ? max_integer + 1u : max_integer;
@@ -563,9 +562,6 @@ private:
             return index;
         }
 
-        // Convert the decimal significand to double. This deliberately avoids
-        // strtod() so the parser has no dependency on locale or C conversion
-        // routines.
         double value = 0.0;
         for (char* p = integer_start; p != current_; ++p)
         {
@@ -574,7 +570,6 @@ private:
             value = value * 10.0 + static_cast<double>(*p - '0');
         }
 
-        // Re-scan the fractional digits. The exponent is adjusted for them.
         int fractional_digits = 0;
         char* p = integer_start;
         while (p != current_ && *p != '.' && *p != 'e' && *p != 'E')
@@ -593,8 +588,6 @@ private:
         int decimal_exponent = exponent_negative ? -exponent : exponent;
         decimal_exponent -= fractional_digits;
 
-        // Zero remains zero regardless of the exponent. This also avoids
-        // forming 0 * infinity for very large positive exponents.
         if (value == 0.0)
         {
             index_type index = document_.add(value_type::number);
@@ -607,8 +600,6 @@ private:
             return index;
         }
 
-        // Apply powers of ten using exponentiation by squaring. This keeps
-        // pathological exponents bounded in runtime.
         double power = 10.0;
         int magnitude_exponent = decimal_exponent < 0
             ? -decimal_exponent
@@ -778,13 +769,6 @@ private:
     }
 };
 
-/**
- * @brief Parse JSON from a writable input buffer into a fixed-capacity document.
- * @param buffer Input JSON buffer. The parser decodes strings in-place.
- * @param size Number of bytes in @p buffer.
- * @param document Destination document.
- * @return Parsing status and, on failure, the input offset at which it occurred.
- */
 template <std::size_t MaxValues, std::size_t MaxDepth>
 parse_result parse(char* buffer, std::size_t size, document<MaxValues, MaxDepth>& document)
 {
