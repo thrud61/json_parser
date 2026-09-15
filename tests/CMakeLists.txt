@@ -1,7 +1,5 @@
 enable_testing()
 
-option(JSON_ENABLE_ASAN "Enable AddressSanitizer for the test executables" OFF)
-
 add_executable(json_test
     json_test.cpp
 )
@@ -30,16 +28,14 @@ target_compile_features(json_adversarial_test
         cxx_std_14
 )
 
-if(JSON_ENABLE_ASAN)
-    if(MSVC)
-        target_compile_options(json_test PRIVATE /fsanitize=address)
-        target_compile_options(json_adversarial_test PRIVATE /fsanitize=address)
-    else()
-        target_compile_options(json_test PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-        target_link_options(json_test PRIVATE -fsanitize=address)
-        target_compile_options(json_adversarial_test PRIVATE -fsanitize=address -fno-omit-frame-pointer)
-        target_link_options(json_adversarial_test PRIVATE -fsanitize=address)
-    endif()
+if(MSVC)
+    target_compile_options(json_test PRIVATE /fsanitize=address)
+    target_compile_options(json_adversarial_test PRIVATE /fsanitize=address)
+else()
+    target_compile_options(json_test PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options(json_test PRIVATE -fsanitize=address)
+    target_compile_options(json_adversarial_test PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options(json_adversarial_test PRIVATE -fsanitize=address)
 endif()
 
 add_test(
