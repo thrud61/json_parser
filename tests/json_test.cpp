@@ -305,6 +305,80 @@ void test_invalid_strings()
     }
 }
 
+void test_error_offsets()
+{
+    struct test_case
+    {
+        const char* input;
+        json::error expected_error;
+        std::size_t expected_offset;
+    };
+
+    const test_case cases[] = {
+        // Invalid value character at the start of the document.
+        { "@", json::error::expected_value, 0 },
+
+        // The key is complete, whitespace is skipped, and the value starts
+        // where the missing ':' is reported.
+        { R"json({"a" 1})json", json::error::expected_colon, 5 },
+
+        // After the first value, the next key is where a comma was expected.
+        { R"json({"a":1 "b":2})json", json::error::expected_comma, 7 },
+
+        // '[' is consumed before parse_value() discovers the missing value.
+        { "[", json::error::unexpected_end, 1 },
+
+        // The parser has consumed the incomplete numeric token before
+        // reporting the error at the end of the input.
+        { "1.", json::error::invalid_number, 2 },
+
+        // Invalid escapes are reported after the escape character has been
+        // consumed, so the offset identifies the following character.
+        { R"json("bad\q")json", json::error::invalid_string, 6 },
+
+        // Invalid literals reset to the beginning of the literal.
+        { "nulx", json::error::invalid_literal, 0 },
+
+        // Trailing data is reported at the first byte that follows a valid
+        // JSON value.
+        { "trueX", json::error::unexpected_character, 4 }
+    };
+
+    for (const test_case& test : cases)
+    {
+        char input[64];
+        std::strcpy(input, test.input);
+
+        json::document<16, 4> document;
+        const auto result =
+            json::parse(input, std::strlen(input), document);
+
+        assert(!result);
+        assert(result.code == test.expected_error);
+        assert(result.offset == test.expected_offset);
+    }
+
+    // Capacity is detected after the value token has been consumed.
+    char capacity_input[] = "[1, 2, 3, 4]";
+    json::document<4, 1> capacity_document;
+    const auto capacity_result =
+        json::parse(capacity_input, std::strlen(capacity_input), capacity_document);
+
+    assert(!capacity_result);
+    assert(capacity_result.code == json::error::capacity_exceeded);
+    assert(capacity_result.offset == 8);
+
+    // The nesting check is made while the nested '[' is still current.
+    char depth_input[] = "[[0]]";
+    json::document<3, 1> depth_document;
+    const auto depth_result =
+        json::parse(depth_input, std::strlen(depth_input), depth_document);
+
+    assert(!depth_result);
+    assert(depth_result.code == json::error::nesting_limit);
+    assert(depth_result.offset == 1);
+}
+
 void test_invalid_json()
 {
     char input[] = R"json({
@@ -332,6 +406,7 @@ int main()
     test_depth_limits();
     test_string_escapes();
     test_invalid_strings();
+    test_error_offsets();
     test_invalid_json();
 
     return 0;
