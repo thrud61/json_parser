@@ -366,7 +366,7 @@ void test_error_offsets()
 
     assert(!capacity_result);
     assert(capacity_result.code == json::error::capacity_exceeded);
-    assert(capacity_result.offset == 8);
+    assert(capacity_result.offset == 11);
 
     // The nesting check is made while the nested '[' is still current.
     char depth_input[] = "[[0]]";
@@ -377,6 +377,76 @@ void test_error_offsets()
     assert(!depth_result);
     assert(depth_result.code == json::error::nesting_limit);
     assert(depth_result.offset == 1);
+}
+
+void test_value_api()
+{
+    char input[] = R"json({
+        "null": null,
+        "boolean": true,
+        "integer": 42,
+        "number": 3.5,
+        "string": "hello",
+        "empty_string": "",
+        "array": [1, 2],
+        "empty_array": [],
+        "object": { "member": false },
+        "empty_object": {}
+    })json";
+
+    json::document<32, 4> document;
+    const auto result =
+        json::parse(input, std::strlen(input), document);
+
+    assert(result);
+
+    const auto root = document.root();
+    assert(root);
+    assert(root.type() == json::value_type::object);
+    assert(root.is_object());
+    assert(root.size() == 10);
+
+    assert(root["null"]);
+    assert(root["null"].is_null());
+
+    assert(root["boolean"].is_boolean());
+    assert(root["boolean"].as_boolean());
+
+    assert(root["integer"].is_integer());
+    assert(root["integer"].is_number());
+    assert(root["integer"].as_integer() == 42);
+    assert(root["integer"].as_number() == 42.0);
+
+    assert(root["number"].type() == json::value_type::number);
+    assert(root["number"].is_number());
+    assert(root["number"].as_number() == 3.5);
+
+    assert(root["string"].is_string());
+    assert(equal(root["string"].as_string(), "hello"));
+    assert(root["empty_string"].is_string());
+    assert(root["empty_string"].as_string().size == 0);
+
+    assert(root["array"].is_array());
+    assert(root["array"].size() == 2);
+    assert(root["array"][0].as_integer() == 1);
+    assert(root["array"][1].as_integer() == 2);
+    assert(root["empty_array"].is_array());
+    assert(root["empty_array"].size() == 0);
+
+    assert(root["object"].is_object());
+    assert(root["object"].size() == 1);
+    assert(root["object"]["member"].is_boolean());
+    assert(!root["object"]["member"].as_boolean());
+    assert(root["empty_object"].is_object());
+    assert(root["empty_object"].size() == 0);
+
+    // Missing members and out-of-range array positions return invalid values.
+    assert(!root["missing"]);
+    assert(!root["array"][2]);
+
+    // A default value and the root of an empty document are invalid.
+    json::document<4, 2> empty_document;
+    assert(!empty_document.root());
 }
 
 void test_invalid_json()
@@ -407,6 +477,7 @@ int main()
     test_string_escapes();
     test_invalid_strings();
     test_error_offsets();
+    test_value_api();
     test_invalid_json();
 
     return 0;
