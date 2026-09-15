@@ -19,20 +19,33 @@ namespace json {
 /**
  * @brief Non-owning reference to a string in the input buffer.
  *
- * String contents are decoded in-place by the parser. The referenced
- * storage is owned by the caller and must remain valid while the
- * reference is used.
+ * The parser decodes JSON string escapes in-place in the caller-provided
+ * input buffer. A string_ref therefore contains a pointer and length rather
+ * than owning a copy of the string.
+ *
+ * @note The referenced storage is owned by the caller and must remain valid
+ * and unchanged for the lifetime of the reference. The input buffer must
+ * also remain valid for as long as any parsed string is accessed.
  */
 struct string_ref
 {
     const char* data;
     std::size_t size;
 
+    /** @brief Return an iterator to the first character. */
     const char* begin() const { return data; }
+
+    /** @brief Return an iterator one past the last character. */
     const char* end() const { return data + size; }
 };
 
-/** @brief JSON value types supported by the parser. */
+/**
+ * @brief JSON value types represented by the parser.
+ *
+ * JSON integers are represented separately from non-integer numbers so that
+ * integral values within the signed 64-bit range can be accessed without a
+ * floating-point conversion.
+ */
 enum class value_type : std::uint8_t
 {
     null,
@@ -44,33 +57,42 @@ enum class value_type : std::uint8_t
     object
 };
 
-/** @brief Errors that can be reported by the parser. */
+/**
+ * @brief Errors that can be reported by the parser.
+ *
+ * The reported offset is zero-based and identifies the parser position at
+ * which the error was detected. For errors detected after consuming input,
+ * such as a capacity failure, the offset can therefore be after the last
+ * consumed character.
+ */
 enum class error : std::uint8_t
 {
-    none,
-    unexpected_end,
-    unexpected_character,
-    invalid_string,
-    invalid_number,
-    invalid_literal,
-    expected_colon,
-    expected_comma,
-    expected_value,
-    nesting_limit,
-    capacity_exceeded
+    none,                 /**< Parsing completed successfully. */
+    unexpected_end,       /**< The input ended before a complete value was found. */
+    unexpected_character, /**< A character was encountered where it is not valid. */
+    invalid_string,       /**< The string contains an invalid escape or control character. */
+    invalid_number,       /**< The number does not follow JSON number syntax or cannot be represented. */
+    invalid_literal,      /**< A JSON literal such as null, true or false is malformed. */
+    expected_colon,       /**< An object member was not followed by ':'. */
+    expected_comma,       /**< An array element or object member was not followed by ','. */
+    expected_value,       /**< A JSON value was expected but none was present. */
+    nesting_limit,        /**< MaxDepth was exceeded. */
+    capacity_exceeded     /**< MaxValues was exceeded. */
 };
 
 /**
  * @brief Result returned by a parse operation.
  *
- * On failure, @c code identifies the error and @c offset identifies
- * its position in the input buffer.
+ * A successful result has @c code equal to @c error::none and can be tested
+ * directly in a boolean context. On failure, @c code identifies the error
+ * and @c offset gives its zero-based position in the input buffer.
  */
 struct parse_result
 {
     error code = error::none;
     std::size_t offset = 0;
 
+    /** @brief Return true when parsing completed successfully. */
     explicit operator bool() const
     {
         return code == error::none;
@@ -80,11 +102,19 @@ struct parse_result
 /**
  * @brief Fixed-capacity parsed JSON document.
  *
- * @tparam MaxValues Maximum number of JSON values stored in the document.
- * @tparam MaxDepth Maximum object/array nesting depth.
+ * @tparam MaxValues Maximum number of value nodes stored by the document.
+ * @tparam MaxDepth Maximum object/array nesting depth accepted by the parser.
  *
- * The document owns no dynamic memory. String values refer directly to
- * the caller-provided input buffer.
+ * The document uses storage contained entirely within the object and performs
+ * no dynamic allocation. The parsed tree is valid only for the lifetime of
+ * the document and its caller-owned input buffer.
+ *
+ * Each JSON value, including an empty object or array, consumes one value
+ * slot. Object member names are stored as non-owning string references and
+ * therefore do not require a separate allocation or copy.
+ *
+ * @note MaxValues is limited to 65535 because value indexes are stored as
+ * 16-bit unsigned integers.
  */
 template <std::size_t MaxValues, std::size_t MaxDepth>
 class document
@@ -122,11 +152,15 @@ public:
     /**
      * @brief Lightweight handle used to access a value in a document.
      *
-     * A value does not own the underlying JSON data. It remains valid only
-     * while the associated document and its input buffer remain valid.
+     * A value does not own the underlying JSON data. It refers to a node in
+     * its associated document and remains usable only while that document
+     * and its input buffer remain valid.
      *
-     * An invalid value may be tested with @c operator bool(). Other accessors
-     * require a valid value handle.
+     * A default-constructed value, a missing object member, or an out-of-range
+     * array access produces an invalid value. Test validity with
+     * @c operator_bool() before accessing the value.
+     *
+     * @warning Accessors other than @c operator_bool() require a valid value.
      */
     class value
     {
@@ -146,37 +180,91 @@ public:
         }
 
     public:
+        /** @brief Construct an invalid value handle. */
         value() : document_(nullptr), index_(invalid_index) {}
 
-        /** @brief Return whether this handle refers to a parsed value. */
+        /** @brief Return whether this handle refers to a valid parsed value. */
         explicit operator bool() const
         {
             return document_ != nullptr && index_ != invalid_index;
         }
 
+        /** @brief Return the JSON type of this value. */
         value_type type() const { return node_ref().type; }
 
+        /** @brief Return true if this value is JSON null. */
         bool is_null() const { return type() == value_type::null; }
+
+        /** @brief Return true if this value is a JSON boolean. */
         bool is_boolean() const { return type() == value_type::boolean; }
+
+        /** @brief Return true if this value is an integer. */
         bool is_integer() const { return type() == value_type::integer; }
+
+        /**
+         * @brief Return true if this value is a JSON number.
+         *
+         * Both integer and non-integer numeric values return true.
+         */
         bool is_number() const
         {
             return type() == value_type::integer || type() == value_type::number;
         }
+
+        /** @brief Return true if this value is a JSON string. */
         bool is_string() const { return type() == value_type::string; }
+
+        /** @brief Return true if this value is a JSON array. */
         bool is_array() const { return type() == value_type::array; }
+
+        /** @brief Return true if this value is a JSON object. */
         bool is_object() const { return type() == value_type::object; }
 
+        /**
+         * @brief Return the boolean value.
+         * @pre The value is valid and @c is_boolean() is true.
+         */
         bool as_boolean() const { return node_ref().data.boolean; }
+
+        /**
+         * @brief Return the signed 64-bit integer value.
+         * @pre The value is valid and @c is_integer() is true.
+         */
         std::int64_t as_integer() const { return node_ref().data.integer; }
+
+        /**
+         * @brief Return the numeric value as a double.
+         *
+         * Integer values are converted to double when accessed through this
+         * function. Such a conversion can lose integer precision for values
+         * outside the exact range of double.
+         *
+         * @pre The value is valid and @c is_number() is true.
+         */
         double as_number() const
         {
             return type() == value_type::integer
                 ? static_cast<double>(node_ref().data.integer)
                 : node_ref().data.number;
         }
+
+        /**
+         * @brief Return a non-owning reference to the string value.
+         *
+         * The returned string_ref points into the caller-owned input buffer.
+         *
+         * @pre The value is valid and @c is_string() is true.
+         */
         string_ref as_string() const { return node_ref().data.string; }
 
+        /**
+         * @brief Return the number of immediate child values.
+         *
+         * For an array this is the number of elements. For an object this is
+         * the number of members. Scalar values return zero.
+         *
+         * @pre The value is valid.
+         */
         std::size_t size() const
         {
             std::size_t result = 0;
@@ -186,6 +274,14 @@ public:
             return result;
         }
 
+        /**
+         * @brief Return an array element by zero-based position.
+         *
+         * Returns an invalid value if @c position is outside the array's
+         * element range.
+         *
+         * @pre The value is valid and represents an array.
+         */
         value operator[](std::size_t position) const
         {
             index_type i = node_ref().first_child;
@@ -197,12 +293,32 @@ public:
             return i == invalid_index ? value() : value(document_, i);
         }
 
+        /**
+         * @brief Return an object member by a string literal key.
+         *
+         * Returns an invalid value when the key is not present. This overload
+         * accepts a character array so that a numeric zero cannot be confused
+         * with a null pointer.
+         *
+         * If duplicate member names are present, the first matching member is
+         * returned.
+         *
+         * @pre The value is valid and represents an object.
+         */
         template <std::size_t N>
         value operator[](const char(&key)[N]) const
         {
             return (*this)[string_ref{ key, N - 1 }];
         }
 
+        /**
+         * @brief Return an object member by a non-owning string reference.
+         *
+         * Returns an invalid value when the key is not present. If duplicate
+         * member names are present, the first matching member is returned.
+         *
+         * @pre The value is valid and represents an object.
+         */
         value operator[](string_ref key) const
         {
             for (index_type i = node_ref().first_child; i != invalid_index;
@@ -228,18 +344,36 @@ public:
         }
     };
 
+    /** @brief Construct an empty document with its fixed storage available. */
     document() : values_{}, value_count_(0) {}
 
-    /** @brief Remove all values from the document. */
+    /**
+     * @brief Remove all parsed values from the document.
+     *
+     * This resets the document to the same logical state as a newly
+     * constructed document. It does not modify the caller-owned input buffer.
+     * Any value handles previously obtained from the document should be
+     * considered invalid after this call.
+     */
     void clear()
     {
         value_count_ = 0;
     }
 
-    /** @brief Return the number of values currently stored. */
+    /**
+     * @brief Return the number of value nodes currently stored.
+     *
+     * This includes container nodes and all their descendants. Object member
+     * names do not consume additional persistent value slots.
+     */
     std::size_t value_count() const { return value_count_; }
 
-    /** @brief Return a handle to the root value, or an invalid value if empty. */
+    /**
+     * @brief Return the root value of the document.
+     *
+     * Returns an invalid value when the document is empty, such as before a
+     * successful parse.
+     */
     value root() const
     {
         return value_count_ == 0 ? value() : value(this, 0);
@@ -276,6 +410,10 @@ class parser;
  * Parsing is recursive. @c MaxDepth therefore bounds both JSON nesting and
  * the parser's recursion depth; very large values of @c MaxDepth increase
  * stack usage accordingly.
+ *
+ * The parser accepts standard JSON whitespace and syntax. Unicode escape
+ * sequences of the form @c \\uXXXX are deliberately not supported; raw bytes
+ * in strings are preserved, but their encoding is not validated.
  */
 template <std::size_t MaxValues, std::size_t MaxDepth>
 class parser
@@ -293,8 +431,14 @@ public:
     /**
      * @brief Construct a parser for a caller-owned writable input buffer.
      *
-     * The buffer must be non-null, even when size is zero, and must remain
-     * valid while the parsed document or any string_ref is used.
+     * @param buffer Start of the input buffer.
+     * @param size Number of bytes in the input buffer.
+     * @param document Document into which the parsed values are stored.
+     *
+     * The buffer must be non-null, even when @p size is zero, and must be
+     * writable because JSON string escapes are decoded in-place. The buffer
+     * and document must remain valid while parsed values and string_ref
+     * objects are used.
      */
     parser(char* buffer, std::size_t size, document_type& document)
         : begin_(buffer), current_(buffer), end_(buffer + size), document_(document)
@@ -304,8 +448,17 @@ public:
     /**
      * @brief Parse the complete input buffer.
      *
-     * The document is cleared before parsing. On failure it may contain a
-     * partial parse and must not be used as a valid JSON document.
+     * The document is cleared before parsing. Leading and trailing JSON
+     * whitespace is accepted, but the complete non-whitespace input must form
+     * exactly one JSON value.
+     *
+     * On success the document contains the parsed tree and the returned
+     * parse_result converts to true. On failure the result identifies the
+     * error and its zero-based input offset. The document may contain a
+     * partial parse after failure and must not be used as a valid JSON
+     * document until a subsequent parse succeeds.
+     *
+     * @return The parse result.
      */
     parse_result parse()
     {
@@ -812,6 +965,25 @@ private:
 };
 
 template <std::size_t MaxValues, std::size_t MaxDepth>
+/**
+ * @brief Parse JSON from a caller-owned writable buffer.
+ *
+ * @tparam MaxValues Maximum number of value nodes stored in the document.
+ * @tparam MaxDepth Maximum object/array nesting depth.
+ * @param buffer Writable input buffer containing one complete JSON value.
+ * @param size Number of bytes in @p buffer.
+ * @param document Destination document whose fixed-capacity storage receives
+ * the parsed values.
+ * @return A parse_result that converts to true on success, or identifies the
+ * error and zero-based input offset on failure.
+ *
+ * The input buffer is modified while strings are decoded. It must remain
+ * valid while the resulting document, values and string_ref objects are used.
+ * The buffer must be non-null even when @p size is zero.
+ *
+ * The document is cleared before parsing. On failure it may contain a partial
+ * parse and must not be treated as valid until a later parse succeeds.
+ */
 parse_result parse(char* buffer, std::size_t size, document<MaxValues, MaxDepth>& document)
 {
     parser<MaxValues, MaxDepth> parser_instance(buffer, size, document);
