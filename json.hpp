@@ -614,7 +614,10 @@ private:
             }
         }
 
-        if (fractional_digits > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()))
+        if (fractional_digits > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) ||
+            (decimal_exponent < 0 &&
+             fractional_digits > static_cast<std::size_t>(
+                 std::numeric_limits<std::int64_t>::max() + decimal_exponent)))
         {
             last_error_ = fail(error::invalid_number);
             return invalid_index;
