@@ -8,6 +8,14 @@
 namespace
 {
 
+int tests_run = 0;
+
+void report_pass(const char* name)
+{
+    ++tests_run;
+    std::printf("PASS: %s\n", name);
+}
+
 void expect_error(const char* text, json::error expected)
 {
     char input[2048];
@@ -17,25 +25,6 @@ void expect_error(const char* text, json::error expected)
 
     json::document<128, 16> document;
     const auto result = json::parse(input, length, document);
-
-    if (!result)
-    {
-        if (result.code != expected)
-        {
-            std::fprintf(stderr,
-                         "Input: \"%s\"\nExpected error: %u\nActual error: %u\n",
-                         text,
-                         static_cast<unsigned>(expected),
-                         static_cast<unsigned>(result.code));
-        }
-    }
-    else
-    {
-        std::fprintf(stderr,
-                     "Input: \"%s\"\nExpected error: %u\nActual result: success\n",
-                     text,
-                     static_cast<unsigned>(expected));
-    }
 
     assert(!result);
     assert(result.code == expected);
@@ -57,14 +46,8 @@ void expect_any_error(const char* text)
 void test_truncated_structures()
 {
     const char* inputs[] = {
-        "[",
-        "[1",
-        "[1,",
-        "{",
-        "{\"a\"",
-        "{\"a\":",
-        "{\"a\":1",
-        "{\"a\":1,"
+        "[", "[1", "[1,", "{", "{\"a\"", "{\"a\":",
+        "{\"a\":1", "{\"a\":1,"
     };
 
     for (const char* input : inputs)
@@ -72,6 +55,8 @@ void test_truncated_structures()
 
     expect_error("{\"a\"", json::error::expected_colon);
     expect_error("{\"a\":1,", json::error::unexpected_character);
+
+    report_pass("truncated arrays and objects (10 cases)");
 }
 
 void test_malformed_separators()
@@ -95,23 +80,15 @@ void test_malformed_separators()
 
     for (const test_case& test : cases)
         expect_error(test.input, test.error);
+
+    report_pass("malformed commas and colons (8 cases)");
 }
 
 void test_malformed_literals()
 {
     const char* inputs[] = {
-        "n",
-        "nu",
-        "nul",
-        "nulx",
-        "t",
-        "tr",
-        "tru",
-        "trux",
-        "f",
-        "fa",
-        "fal",
-        "falsx"
+        "n", "nu", "nul", "nulx", "t", "tr", "tru", "trux",
+        "f", "fa", "fal", "falsx"
     };
 
     for (const char* input : inputs)
@@ -119,21 +96,15 @@ void test_malformed_literals()
 
     expect_error("nullx", json::error::unexpected_character);
     expect_error("truefalse", json::error::unexpected_character);
+
+    report_pass("truncated and malformed literals (14 cases)");
 }
 
 void test_malformed_numbers()
 {
     const char* inputs[] = {
-        "-",
-        "01",
-        "-01",
-        "1.",
-        "1.e1",
-        "1e",
-        "1e+",
-        "1e-",
-        "--1",
-        "-+1"
+        "-", "01", "-01", "1.", "1.e1", "1e", "1e+", "1e-",
+        "--1", "-+1"
     };
 
     for (const char* input : inputs)
@@ -144,18 +115,15 @@ void test_malformed_numbers()
     expect_error("1x", json::error::unexpected_character);
     expect_error("1.0x", json::error::unexpected_character);
     expect_error("1e2x", json::error::unexpected_character);
+
+    report_pass("malformed numbers, invalid starts and trailing characters (15 cases)");
 }
 
 void test_string_boundaries()
 {
     const char* inputs[] = {
-        "\"",
-        "\"abc",
-        "\"abc\\",
-        "\"abc\\\"",
-        "\"abc\\q\"",
-        "\"abc\\u\"",
-        "\"abc\n\""
+        "\"", "\"abc", "\"abc\\", "\"abc\\\"",
+        "\"abc\\q\"", "\"abc\\u\"", "\"abc\n\""
     };
 
     for (const char* input : inputs)
@@ -170,11 +138,12 @@ void test_string_boundaries()
         assert(result.code == json::error::unexpected_end ||
                result.code == json::error::invalid_string);
     }
+
+    report_pass("unterminated strings, invalid escapes and control characters (7 cases)");
 }
 
 void test_long_tokens()
 {
-    // Long valid strings must not require storage proportional to string size.
     char string_input[1024];
     string_input[0] = '"';
     for (std::size_t i = 1; i < sizeof(string_input) - 2; ++i)
@@ -183,19 +152,16 @@ void test_long_tokens()
     string_input[sizeof(string_input) - 1] = '\0';
 
     json::document<2, 1> string_document;
-    const auto string_result =
-        json::parse(string_input, sizeof(string_input) - 1, string_document);
+    const auto string_result = json::parse(string_input, sizeof(string_input) - 1, string_document);
     assert(string_result);
     assert(string_document.root().is_string());
     assert(string_document.root().as_string().size == sizeof(string_input) - 3);
 
-    // A very long integer must fail without overflowing the accumulator.
     char integer_input[1024];
     std::memset(integer_input, '9', sizeof(integer_input) - 1);
     integer_input[sizeof(integer_input) - 1] = '\0';
     expect_error(integer_input, json::error::invalid_number);
 
-    // A long fractional token should remain bounded and parse successfully.
     char fraction_input[1024];
     fraction_input[0] = '0';
     fraction_input[1] = '.';
@@ -204,10 +170,11 @@ void test_long_tokens()
     fraction_input[sizeof(fraction_input) - 1] = '\0';
 
     json::document<2, 1> fraction_document;
-    const auto fraction_result =
-        json::parse(fraction_input, sizeof(fraction_input) - 1, fraction_document);
+    const auto fraction_result = json::parse(fraction_input, sizeof(fraction_input) - 1, fraction_document);
     assert(fraction_result);
     assert(std::isfinite(fraction_document.root().as_number()));
+
+    report_pass("long string, integer and fractional tokens");
 }
 
 void test_whitespace_and_trailing_data()
@@ -217,14 +184,15 @@ void test_whitespace_and_trailing_data()
     std::memcpy(whitespace_input + sizeof(whitespace_input) - 5, "null ", 5);
 
     json::document<2, 1> document;
-    const auto result =
-        json::parse(whitespace_input, sizeof(whitespace_input), document);
+    const auto result = json::parse(whitespace_input, sizeof(whitespace_input), document);
     assert(result);
     assert(document.root().is_null());
 
     expect_error("null null", json::error::unexpected_character);
     expect_error("[]{}", json::error::unexpected_character);
     expect_error("\"a\"\"b\"", json::error::unexpected_character);
+
+    report_pass("large whitespace runs and trailing JSON data (4 cases)");
 }
 
 void test_reparse_after_failure()
@@ -232,8 +200,7 @@ void test_reparse_after_failure()
     json::document<8, 4> document;
 
     char invalid[] = "{\"a\":[1,2,}";
-    const auto invalid_result =
-        json::parse(invalid, std::strlen(invalid), document);
+    const auto invalid_result = json::parse(invalid, std::strlen(invalid), document);
     assert(!invalid_result);
 
     char valid[] = "{\"answer\":42}";
@@ -242,12 +209,17 @@ void test_reparse_after_failure()
     assert(document.root().is_object());
     assert(document.root().size() == 1);
     assert(document.root()["answer"].as_integer() == 42);
+
+    report_pass("reuse of document after a failed parse");
 }
 
 } // namespace
 
 int main()
 {
+    std::printf("JSON parser adversarial test suite\n");
+    std::printf("=================================\n");
+
     test_truncated_structures();
     test_malformed_separators();
     test_malformed_literals();
@@ -257,5 +229,7 @@ int main()
     test_whitespace_and_trailing_data();
     test_reparse_after_failure();
 
+    std::printf("---------------------------------\n");
+    std::printf("%d tests passed\n", tests_run);
     return 0;
 }
