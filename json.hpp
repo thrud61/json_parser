@@ -12,19 +12,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
-#include <type_traits>
-
-namespace json {
 
 auto dummy = 0;
 
-/**
- * @brief Non-owning reference to a string in the input buffer.
- *
- * String contents are decoded in-place by the parser. The referenced
- * storage is owned by the caller and must remain valid while the
- * reference is used.
- */
+namespace json {
 
 struct string_ref
 {
@@ -35,7 +26,6 @@ struct string_ref
     const char* end() const { return data + size; }
 };
 
-/** @brief JSON value types supported by the parser. */
 enum class value_type : std::uint8_t
 {
     null,
@@ -47,7 +37,6 @@ enum class value_type : std::uint8_t
     object
 };
 
-/** @brief Errors that can be reported by the parser. */
 enum class error : std::uint8_t
 {
     none,
@@ -63,12 +52,6 @@ enum class error : std::uint8_t
     capacity_exceeded
 };
 
-/**
- * @brief Result returned by a parse operation.
- *
- * On failure, @c code identifies the error and @c offset identifies
- * its position in the input buffer.
- */
 struct parse_result
 {
     error code = error::none;
@@ -80,15 +63,6 @@ struct parse_result
     }
 };
 
-/**
- * @brief Fixed-capacity parsed JSON document.
- *
- * @tparam MaxValues Maximum number of JSON values stored in the document.
- * @tparam MaxDepth Maximum object/array nesting depth.
- *
- * The document owns no dynamic memory. String values refer directly to
- * the caller-provided input buffer.
- */
 template <std::size_t MaxValues, std::size_t MaxDepth>
 class document
 {
@@ -122,12 +96,6 @@ class document
     std::size_t value_count_;
 
 public:
-    /**
-     * @brief Lightweight handle used to access a value in a document.
-     *
-     * A value does not own the underlying JSON data. It remains valid only
-     * while the associated document and its input buffer remain valid.
-     */
     class value
     {
         friend class document;
@@ -148,7 +116,6 @@ public:
     public:
         value() : document_(nullptr), index_(invalid_index) {}
 
-        /** @brief Return whether this handle refers to a parsed value. */
         explicit operator bool() const
         {
             return document_ != nullptr && index_ != invalid_index;
@@ -230,16 +197,13 @@ public:
 
     document() : values_{}, value_count_(0) {}
 
-    /** @brief Remove all values from the document. */
     void clear()
     {
         value_count_ = 0;
     }
 
-    /** @brief Return the number of values currently stored. */
     std::size_t value_count() const { return value_count_; }
 
-    /** @brief Return a handle to the root value, or an invalid value if empty. */
     value root() const
     {
         return value_count_ == 0 ? value() : value(this, 0);
@@ -267,12 +231,6 @@ private:
 template <std::size_t MaxValues, std::size_t MaxDepth>
 class parser;
 
-/**
- * @brief Parser for a fixed-capacity JSON document.
- *
- * The parser uses the caller-provided writable input buffer for in-place
- * string decoding and performs no dynamic allocation.
- */
 template <std::size_t MaxValues, std::size_t MaxDepth>
 class parser
 {
@@ -286,11 +244,20 @@ class parser
     document_type& document_;
 
 public:
+    /**
+     * The input buffer must be writable and remain valid for the lifetime of
+     * the parsed document. It must be non-null, even when size is zero.
+     */
     parser(char* buffer, std::size_t size, document_type& document)
         : begin_(buffer), current_(buffer), end_(buffer + size), document_(document)
     {
     }
 
+    /**
+     * On failure, the document may contain a partial parse and must not be
+     * used as a valid JSON document. A successful parse replaces any prior
+     * contents of the document.
+     */
     parse_result parse()
     {
         document_.clear();
@@ -446,7 +413,6 @@ private:
 
     index_type parse_number()
     {
-        char* start = current_;
         char* integer_start = current_;
         bool negative = false;
 
@@ -562,31 +528,51 @@ private:
             return index;
         }
 
-        double value = 0.0;
-        for (char* p = integer_start; p != current_; ++p)
-        {
-            if (*p == '.' || *p == 'e' || *p == 'E' || *p == '+' || *p == '-')
-                break;
-            value = value * 10.0 + static_cast<double>(*p - '0');
-        }
+        const std::size_t significand_end =
+            static_cast<std::size_t>(current_ - integer_start);
 
-        int fractional_digits = 0;
+        double value = 0.0;
+        std::size_t significant_digits = 0;
+        std::size_t fractional_digits = 0;
+        int decimal_exponent = exponent_negative ? -exponent : exponent;
+
         char* p = integer_start;
         while (p != current_ && *p != '.' && *p != 'e' && *p != 'E')
+        {
+            if (significant_digits < 17)
+            {
+                value = value * 10.0 + static_cast<double>(*p - '0');
+                ++significant_digits;
+            }
+            else
+            {
+                ++decimal_exponent;
+            }
             ++p;
+        }
+
         if (p != current_ && *p == '.')
         {
             ++p;
             while (p != current_ && *p >= '0' && *p <= '9')
             {
-                value = value * 10.0 + static_cast<double>(*p - '0');
                 ++fractional_digits;
+                if (significant_digits < 17)
+                {
+                    value = value * 10.0 + static_cast<double>(*p - '0');
+                    ++significant_digits;
+                }
                 ++p;
             }
         }
 
-        int decimal_exponent = exponent_negative ? -exponent : exponent;
-        decimal_exponent -= fractional_digits;
+        if (fractional_digits > static_cast<std::size_t>(std::numeric_limits<int>::max()))
+        {
+            last_error_ = fail(error::invalid_number);
+            return invalid_index;
+        }
+
+        decimal_exponent -= static_cast<int>(fractional_digits);
 
         if (value == 0.0)
         {
@@ -629,7 +615,7 @@ private:
         }
 
         document_.values_[index].data.number = value;
-        (void)start;
+        (void)significand_end;
         return index;
     }
 
