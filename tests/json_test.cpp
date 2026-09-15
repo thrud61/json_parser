@@ -255,6 +255,56 @@ void test_depth_limits()
     assert(over_result.code == json::error::nesting_limit);
 }
 
+void test_string_escapes()
+{
+    char input[] = R"json({
+        "quote": "say \"hello\"",
+        "backslash": "C:\\temp\\file.txt",
+        "slash": "a\/b",
+        "controls": "\b\f\n\r\t",
+        "empty": "",
+        "punctuation": " !@#$%^&*()[]{}:;,?"
+    })json";
+
+    json::document<16, 4> document;
+    const auto result =
+        json::parse(input, std::strlen(input), document);
+
+    assert(result);
+
+    const auto root = document.root();
+    assert(equal(root["quote"].as_string(), "say \"hello\""));
+    assert(equal(root["backslash"].as_string(), "C:\\temp\\file.txt"));
+    assert(equal(root["slash"].as_string(), "a/b"));
+    assert(equal(root["controls"].as_string(), "\b\f\n\r\t"));
+    assert(equal(root["empty"].as_string(), ""));
+    assert(equal(root["punctuation"].as_string(), " !@#$%^&*()[]{}:;,?"));
+}
+
+void test_invalid_strings()
+{
+    const char* inputs[] = {
+        R"json("bad\q")json",
+        R"json("bad\u1234")json",
+        R"json("unterminated)json",
+        "\"line\nfeed\""
+    };
+
+    for (const char* text : inputs)
+    {
+        char input[64];
+        std::strcpy(input, text);
+
+        json::document<8, 2> document;
+        const auto result =
+            json::parse(input, std::strlen(input), document);
+
+        assert(!result);
+        assert(result.code == json::error::invalid_string ||
+               result.code == json::error::unexpected_end);
+    }
+}
+
 void test_invalid_json()
 {
     char input[] = R"json({
@@ -280,6 +330,8 @@ int main()
     test_invalid_numbers();
     test_capacity_limits();
     test_depth_limits();
+    test_string_escapes();
+    test_invalid_strings();
     test_invalid_json();
 
     return 0;
