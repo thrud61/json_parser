@@ -47,12 +47,10 @@ json::document<256, 32> doc;
 auto result = json::parse(buffer, sizeof(buffer) - 1, doc);
 
 if (!result)
-    return result.error();
+    return static_cast<int>(result.code);
 
 // Access parsed values...
 ```
-
-The exact API is still under development.
 
 ## JSON support
 
@@ -103,7 +101,7 @@ A failed parse may leave a partial document; the document must not be used unles
 
 ## Status
 
-Early design stage. The API and internal representation are not yet finalised.
+The parser is usable for its intended bounded, configuration-oriented use case. The API and internal representation may still evolve.
 
 ## License
 
