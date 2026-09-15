@@ -89,7 +89,7 @@ void test_malformed_separators()
         { "{,}", json::error::unexpected_character },
         { "{\"a\",1}", json::error::expected_colon },
         { "{\"a\":}", json::error::expected_value },
-        { "{\"a\":1,}", json::error::expected_value },
+        { "{\"a\":1,}", json::error::unexpected_character },
         { "{\"a\":1 \"b\":2}", json::error::expected_comma }
     };
 
