@@ -125,8 +125,6 @@ void test_malformed_numbers()
 {
     const char* inputs[] = {
         "-",
-        "+1",
-        ".1",
         "01",
         "-01",
         "1.",
@@ -141,6 +139,8 @@ void test_malformed_numbers()
     for (const char* input : inputs)
         expect_error(input, json::error::invalid_number);
 
+    expect_error("+1", json::error::expected_value);
+    expect_error(".1", json::error::expected_value);
     expect_error("1x", json::error::unexpected_character);
     expect_error("1.0x", json::error::unexpected_character);
     expect_error("1e2x", json::error::unexpected_character);
