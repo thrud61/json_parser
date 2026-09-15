@@ -31,9 +31,11 @@ The template parameters define:
 - `256` — maximum number of JSON values/nodes, including the root value.
 - `32` — maximum JSON nesting depth.
 
+Each JSON value consumes one node, including container values such as arrays and objects. Object member names do not consume additional value nodes.
+
 The document does not allocate memory dynamically. Its storage requirements are therefore known from its template parameters and the implementation's fixed-size supporting storage.
 
-JSON strings are intended to be decoded in-place in the caller-provided input buffer. This avoids allocating separate storage for string contents.
+JSON strings are decoded in-place in the caller-provided input buffer. This avoids allocating separate storage for string contents.
 
 ## Intended usage
 
@@ -49,7 +51,7 @@ auto result = json::parse(buffer, sizeof(buffer) - 1, doc);
 if (!result)
     return static_cast<int>(result.code);
 
-// Access parsed values...
+auto port = doc.root()["server"]["port"].as_integer();
 ```
 
 ## JSON support
@@ -62,13 +64,15 @@ The parser supports the core JSON value types and JSON number/string syntax need
 - strings
 - arrays
 - objects
-- JSON whitespace and the standard simple string escapes
+- JSON whitespace
+- the standard simple string escapes: `\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, and `\t`
 
-The `\uXXXX` Unicode escape form is currently rejected rather than decoded. Raw UTF-8 bytes in strings are not interpreted by the parser and are retained as input bytes.
+The following are deliberate limitations or policy choices:
 
-Duplicate object member names are permitted. When looking up a member by name, the first matching member is returned.
-
-Non-standard extensions such as comments are not supported.
+- The `\uXXXX` Unicode escape form is rejected rather than decoded.
+- Raw bytes in strings are retained as input bytes; UTF-8 encoding is not validated.
+- Duplicate object member names are permitted. When looking up a member by name, the first matching member is returned.
+- Non-standard JSON extensions such as comments, single-quoted strings, trailing commas, and unquoted object keys are not supported.
 
 ## Resource limits
 
@@ -88,21 +92,29 @@ Floating-point values are converted using bounded decimal processing rather than
 
 ## API behaviour
 
-`document::value` is a lightweight, non-owning handle. Missing object members and out-of-range array elements produce an invalid value, which can be tested with:
+`document::value` is a lightweight, non-owning handle to a parsed value. The main accessors are:
+
+- `type()` and the `is_*()` functions for inspecting the JSON type
+- `as_boolean()`, `as_integer()`, `as_number()`, and `as_string()` for retrieving values
+- `size()` for the number of immediate array elements or object members
+- `operator[](std::size_t)` for array element access
+- `operator[]("key")` for object member lookup
+
+Missing object members and out-of-range array elements produce an invalid value, which can be tested with `operator bool()`:
 
 ```cpp
 if (!doc.root()["missing"])
     // member was not present
 ```
 
-`operator bool()` is the validity check. Other `value` accessors assume the handle is valid.
+Other `value` accessors assume the handle is valid and that the requested type matches the accessor.
 
 A failed parse may leave a partial document; the document must not be used unless the parse operation succeeds.
 
 ## Status
 
-The parser is usable for its intended bounded, configuration-oriented use case. The API and internal representation may still evolve.
+The parser is intended for bounded, configuration-oriented use. The implementation is covered by unit and adversarial tests, while the API may evolve as the project develops.
 
 ## License
 
-To be decided.
+MIT License. See [LICENSE](LICENSE).
