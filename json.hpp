@@ -13,8 +13,6 @@
 #include <cstdint>
 #include <limits>
 
-auto dummy = 0;
-
 namespace json {
 
 struct string_ref
@@ -245,8 +243,10 @@ class parser
 
 public:
     /**
-     * The input buffer must be writable and remain valid for the lifetime of
-     * the parsed document. It must be non-null, even when size is zero.
+     * @brief Construct a parser for a caller-owned writable input buffer.
+     *
+     * The buffer must be non-null, even when size is zero, and must remain
+     * valid while the parsed document or any string_ref is used.
      */
     parser(char* buffer, std::size_t size, document_type& document)
         : begin_(buffer), current_(buffer), end_(buffer + size), document_(document)
@@ -254,9 +254,10 @@ public:
     }
 
     /**
-     * On failure, the document may contain a partial parse and must not be
-     * used as a valid JSON document. A successful parse replaces any prior
-     * contents of the document.
+     * @brief Parse the complete input buffer.
+     *
+     * The document is cleared before parsing. On failure it may contain a
+     * partial parse and must not be used as a valid JSON document.
      */
     parse_result parse()
     {
@@ -528,9 +529,6 @@ private:
             return index;
         }
 
-        const std::size_t significand_end =
-            static_cast<std::size_t>(current_ - integer_start);
-
         double value = 0.0;
         std::size_t significant_digits = 0;
         std::size_t fractional_digits = 0;
@@ -615,7 +613,6 @@ private:
         }
 
         document_.values_[index].data.number = value;
-        (void)significand_end;
         return index;
     }
 
