@@ -2,10 +2,19 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace
 {
+
+int tests_run = 0;
+
+void report_pass(const char* name)
+{
+    ++tests_run;
+    std::printf("PASS: %s\n", name);
+}
 
 bool equal(json::string_ref value, const char* expected)
 {
@@ -66,9 +75,7 @@ void test_cmake_settings()
 })json";
 
     json::document<64, 8> document;
-
-    const auto result =
-        json::parse(input, std::strlen(input), document);
+    const auto result = json::parse(input, std::strlen(input), document);
 
     assert(result);
     assert(result.code == json::error::none);
@@ -92,7 +99,6 @@ void test_cmake_settings()
     assert(environments.size() == 1);
     assert(equal(environments[0].as_string(), "msvc_x64_x64"));
 
-    // JSON escapes are decoded in-place in the caller-owned buffer.
     assert(equal(
         msvc["buildRoot"].as_string(),
         "${projectDir}\\out\\build\\${name}"
@@ -101,7 +107,6 @@ void test_cmake_settings()
     const auto variables = msvc["variables"];
     assert(variables.is_array());
     assert(variables.size() == 3);
-
     assert(equal(variables[0]["name"].as_string(), "USE_LOG_TYPE"));
     assert(equal(variables[0]["value"].as_string(), "DualLogging"));
     assert(equal(variables[2]["name"].as_string(), "CONTAINER_ID"));
@@ -120,6 +125,8 @@ void test_cmake_settings()
     assert(equal(vx_variables[0]["name"].as_string(), "WIND_HOME"));
     assert(equal(vx_variables[1]["name"].as_string(), "VXWORKS"));
     assert(equal(vx_variables[1]["value"].as_string(), "True"));
+
+    report_pass("CMakeSettings parsing, nested lookup and in-place strings");
 }
 
 void test_numeric_values()
@@ -137,62 +144,47 @@ void test_numeric_values()
     })json";
 
     json::document<32, 4> document;
-    const auto result =
-        json::parse(input, std::strlen(input), document);
-
+    const auto result = json::parse(input, std::strlen(input), document);
     assert(result);
 
     const auto root = document.root();
-
     assert(root["zero"].is_integer());
     assert(root["zero"].as_integer() == 0);
-
     assert(root["positive"].is_integer());
     assert(root["positive"].as_integer() == 123456789);
-
     assert(root["negative"].is_integer());
     assert(root["negative"].as_integer() == -987654321);
-
     assert(root["max"].is_integer());
     assert(root["max"].as_integer() == 9223372036854775807LL);
-
     assert(root["min"].is_integer());
     assert(root["min"].as_integer() == (-9223372036854775807LL - 1));
-
     assert(root["fraction"].is_number());
     assert(root["fraction"].as_number() == 123.456);
-
     assert(root["negative_fraction"].as_number() == -0.25);
-
     assert(root["exponent"].as_number() == 1500.0);
-
     assert(root["negative_exponent"].as_number() == 0.025);
+
+    report_pass("valid integers, int64 boundaries, fractions and exponents");
 }
 
 void test_invalid_numbers()
 {
     const char* inputs[] = {
-        "01",
-        "-",
-        "1.",
-        "1e",
-        "1e+",
-        "9223372036854775808",
-        "-9223372036854775809"
+        "01", "-", "1.", "1e", "1e+",
+        "9223372036854775808", "-9223372036854775809"
     };
 
     for (const char* text : inputs)
     {
         char input[64];
         std::strcpy(input, text);
-
         json::document<8, 2> document;
-        const auto result =
-            json::parse(input, std::strlen(input), document);
-
+        const auto result = json::parse(input, std::strlen(input), document);
         assert(!result);
         assert(result.code == json::error::invalid_number);
     }
+
+    report_pass("invalid number syntax and int64 overflow (7 cases)");
 }
 
 void test_numeric_edges()
@@ -220,67 +212,52 @@ void test_numeric_edges()
         assert(result);
         assert(std::isfinite(document.root().as_number()));
     }
+
+    report_pass("floating-point overflow and extreme exponent handling (3 cases)");
 }
 
 void test_capacity_limits()
 {
-    // The root array plus its three elements uses exactly four values.
     char exact_input[] = "[1, 2, 3]";
     json::document<4, 1> exact_document;
-
-    const auto exact_result =
-        json::parse(exact_input, std::strlen(exact_input), exact_document);
-
+    const auto exact_result = json::parse(exact_input, std::strlen(exact_input), exact_document);
     assert(exact_result);
     assert(exact_document.value_count() == 4);
     assert(exact_document.root().size() == 3);
 
-    // The fourth element requires a fifth value and must exceed the limit.
     char over_input[] = "[1, 2, 3, 4]";
     json::document<4, 1> over_document;
-
-    const auto over_result =
-        json::parse(over_input, std::strlen(over_input), over_document);
-
+    const auto over_result = json::parse(over_input, std::strlen(over_input), over_document);
     assert(!over_result);
     assert(over_result.code == json::error::capacity_exceeded);
 
-    // Empty containers still consume one value each.
     char empty_input[] = "{}";
     json::document<1, 1> empty_document;
-
-    const auto empty_result =
-        json::parse(empty_input, std::strlen(empty_input), empty_document);
-
+    const auto empty_result = json::parse(empty_input, std::strlen(empty_input), empty_document);
     assert(empty_result);
     assert(empty_document.value_count() == 1);
     assert(empty_document.root().is_object());
     assert(empty_document.root().size() == 0);
+
+    report_pass("value capacity boundaries and empty-container storage");
 }
 
 void test_depth_limits()
 {
-    // The root container is at depth zero, so one level of nesting is
-    // permitted with MaxDepth == 1.
     char exact_input[] = "[0]";
     json::document<2, 1> exact_document;
-
-    const auto exact_result =
-        json::parse(exact_input, std::strlen(exact_input), exact_document);
-
+    const auto exact_result = json::parse(exact_input, std::strlen(exact_input), exact_document);
     assert(exact_result);
     assert(exact_document.root().is_array());
     assert(exact_document.root().size() == 1);
 
-    // A nested container reaches depth one and must exceed MaxDepth == 1.
     char over_input[] = "[[0]]";
     json::document<3, 1> over_document;
-
-    const auto over_result =
-        json::parse(over_input, std::strlen(over_input), over_document);
-
+    const auto over_result = json::parse(over_input, std::strlen(over_input), over_document);
     assert(!over_result);
     assert(over_result.code == json::error::nesting_limit);
+
+    report_pass("maximum nesting boundary");
 }
 
 void test_string_escapes()
@@ -295,9 +272,7 @@ void test_string_escapes()
     })json";
 
     json::document<16, 4> document;
-    const auto result =
-        json::parse(input, std::strlen(input), document);
-
+    const auto result = json::parse(input, std::strlen(input), document);
     assert(result);
 
     const auto root = document.root();
@@ -307,6 +282,8 @@ void test_string_escapes()
     assert(equal(root["controls"].as_string(), "\b\f\n\r\t"));
     assert(equal(root["empty"].as_string(), ""));
     assert(equal(root["punctuation"].as_string(), " !@#$%^&*()[]{}:;,?"));
+
+    report_pass("JSON string escapes, empty strings and punctuation");
 }
 
 void test_invalid_strings()
@@ -322,15 +299,14 @@ void test_invalid_strings()
     {
         char input[64];
         std::strcpy(input, text);
-
         json::document<8, 2> document;
-        const auto result =
-            json::parse(input, std::strlen(input), document);
-
+        const auto result = json::parse(input, std::strlen(input), document);
         assert(!result);
         assert(result.code == json::error::invalid_string ||
                result.code == json::error::unexpected_end);
     }
+
+    report_pass("invalid escapes, unsupported Unicode escapes and unterminated strings (4 cases)");
 }
 
 void test_error_offsets()
@@ -343,32 +319,13 @@ void test_error_offsets()
     };
 
     const test_case cases[] = {
-        // Invalid value character at the start of the document.
         { "@", json::error::expected_value, 0 },
-
-        // The key is complete, whitespace is skipped, and the value starts
-        // where the missing ':' is reported.
         { R"json({"a" 1})json", json::error::expected_colon, 5 },
-
-        // After the first value, the next key is where a comma was expected.
         { R"json({"a":1 "b":2})json", json::error::expected_comma, 7 },
-
-        // '[' is consumed before parse_value() discovers the missing value.
         { "[", json::error::unexpected_end, 1 },
-
-        // The parser has consumed the incomplete numeric token before
-        // reporting the error at the end of the input.
         { "1.", json::error::invalid_number, 2 },
-
-        // Invalid escapes are reported after the escape character has been
-        // consumed, so the offset identifies the following character.
         { R"json("bad\q")json", json::error::invalid_string, 6 },
-
-        // Invalid literals reset to the beginning of the literal.
         { "nulx", json::error::invalid_literal, 0 },
-
-        // Trailing data is reported at the first byte that follows a valid
-        // JSON value.
         { "trueX", json::error::unexpected_character, 4 }
     };
 
@@ -376,35 +333,28 @@ void test_error_offsets()
     {
         char input[64];
         std::strcpy(input, test.input);
-
         json::document<16, 4> document;
-        const auto result =
-            json::parse(input, std::strlen(input), document);
-
+        const auto result = json::parse(input, std::strlen(input), document);
         assert(!result);
         assert(result.code == test.expected_error);
         assert(result.offset == test.expected_offset);
     }
 
-    // Capacity is detected after the value token has been consumed.
     char capacity_input[] = "[1, 2, 3, 4]";
     json::document<4, 1> capacity_document;
-    const auto capacity_result =
-        json::parse(capacity_input, std::strlen(capacity_input), capacity_document);
-
+    const auto capacity_result = json::parse(capacity_input, std::strlen(capacity_input), capacity_document);
     assert(!capacity_result);
     assert(capacity_result.code == json::error::capacity_exceeded);
     assert(capacity_result.offset == 11);
 
-    // The nesting check is made while the nested '[' is still current.
     char depth_input[] = "[[0]]";
     json::document<3, 1> depth_document;
-    const auto depth_result =
-        json::parse(depth_input, std::strlen(depth_input), depth_document);
-
+    const auto depth_result = json::parse(depth_input, std::strlen(depth_input), depth_document);
     assert(!depth_result);
     assert(depth_result.code == json::error::nesting_limit);
     assert(depth_result.offset == 1);
+
+    report_pass("error codes and source offsets (10 cases)");
 }
 
 void test_value_api()
@@ -423,9 +373,7 @@ void test_value_api()
     })json";
 
     json::document<32, 4> document;
-    const auto result =
-        json::parse(input, std::strlen(input), document);
-
+    const auto result = json::parse(input, std::strlen(input), document);
     assert(result);
 
     const auto root = document.root();
@@ -433,48 +381,40 @@ void test_value_api()
     assert(root.type() == json::value_type::object);
     assert(root.is_object());
     assert(root.size() == 10);
-
     assert(root["null"]);
     assert(root["null"].is_null());
-
     assert(root["boolean"].is_boolean());
     assert(root["boolean"].as_boolean());
-
     assert(root["integer"].is_integer());
     assert(root["integer"].is_number());
     assert(root["integer"].as_integer() == 42);
     assert(root["integer"].as_number() == 42.0);
-
     assert(root["number"].type() == json::value_type::number);
     assert(root["number"].is_number());
     assert(root["number"].as_number() == 3.5);
-
     assert(root["string"].is_string());
     assert(equal(root["string"].as_string(), "hello"));
     assert(root["empty_string"].is_string());
     assert(root["empty_string"].as_string().size == 0);
-
     assert(root["array"].is_array());
     assert(root["array"].size() == 2);
     assert(root["array"][0].as_integer() == 1);
     assert(root["array"][1].as_integer() == 2);
     assert(root["empty_array"].is_array());
     assert(root["empty_array"].size() == 0);
-
     assert(root["object"].is_object());
     assert(root["object"].size() == 1);
     assert(root["object"]["member"].is_boolean());
     assert(!root["object"]["member"].as_boolean());
     assert(root["empty_object"].is_object());
     assert(root["empty_object"].size() == 0);
-
-    // Missing members and out-of-range array positions return invalid values.
     assert(!root["missing"]);
     assert(!root["array"][2]);
 
-    // A default value and the root of an empty document are invalid.
     json::document<4, 2> empty_document;
     assert(!empty_document.root());
+
+    report_pass("value API types, accessors, indexing and invalid-value checks");
 }
 
 void test_invalid_json()
@@ -485,18 +425,20 @@ void test_invalid_json()
     })json";
 
     json::document<16, 4> document;
-
-    const auto result =
-        json::parse(input, std::strlen(input), document);
-
+    const auto result = json::parse(input, std::strlen(input), document);
     assert(!result);
     assert(result.code == json::error::expected_comma);
+
+    report_pass("malformed object missing comma");
 }
 
 } // namespace
 
 int main()
 {
+    std::printf("JSON parser test suite\n");
+    std::printf("======================\n");
+
     test_cmake_settings();
     test_numeric_values();
     test_invalid_numbers();
@@ -509,5 +451,7 @@ int main()
     test_value_api();
     test_invalid_json();
 
+    std::printf("----------------------\n");
+    std::printf("%d tests passed\n", tests_run);
     return 0;
 }
