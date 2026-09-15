@@ -582,7 +582,7 @@ private:
                 value = value * 10.0 + static_cast<double>(*p - '0');
                 ++significant_digits;
             }
-            else
+            else if (decimal_exponent < 10000)
             {
                 ++decimal_exponent;
             }
