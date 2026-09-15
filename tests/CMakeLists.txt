@@ -8,12 +8,21 @@ add_executable(json_adversarial_test
     adversarial_test.cpp
 )
 
+add_executable(json_numeric_edge_test
+    numeric_edge_test.cpp
+)
+
 target_include_directories(json_test
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 target_include_directories(json_adversarial_test
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
+)
+
+target_include_directories(json_numeric_edge_test
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
@@ -28,14 +37,22 @@ target_compile_features(json_adversarial_test
         cxx_std_14
 )
 
+target_compile_features(json_numeric_edge_test
+    PRIVATE
+        cxx_std_14
+)
+
 if(MSVC)
     target_compile_options(json_test PRIVATE /fsanitize=address)
     target_compile_options(json_adversarial_test PRIVATE /fsanitize=address)
+    target_compile_options(json_numeric_edge_test PRIVATE /fsanitize=address)
 else()
     target_compile_options(json_test PRIVATE -fsanitize=address -fno-omit-frame-pointer)
     target_link_options(json_test PRIVATE -fsanitize=address)
     target_compile_options(json_adversarial_test PRIVATE -fsanitize=address -fno-omit-frame-pointer)
     target_link_options(json_adversarial_test PRIVATE -fsanitize=address)
+    target_compile_options(json_numeric_edge_test PRIVATE -fsanitize=address -fno-omit-frame-pointer)
+    target_link_options(json_numeric_edge_test PRIVATE -fsanitize=address)
 endif()
 
 add_test(
@@ -46,4 +63,9 @@ add_test(
 add_test(
     NAME json_adversarial_test
     COMMAND json_adversarial_test
+)
+
+add_test(
+    NAME json_numeric_edge_test
+    COMMAND json_numeric_edge_test
 )
