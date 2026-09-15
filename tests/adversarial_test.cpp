@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace
@@ -16,6 +17,25 @@ void expect_error(const char* text, json::error expected)
 
     json::document<128, 16> document;
     const auto result = json::parse(input, length, document);
+
+    if (!result)
+    {
+        if (result.code != expected)
+        {
+            std::fprintf(stderr,
+                         "Input: \"%s\"\nExpected error: %u\nActual error: %u\n",
+                         text,
+                         static_cast<unsigned>(expected),
+                         static_cast<unsigned>(result.code));
+        }
+    }
+    else
+    {
+        std::fprintf(stderr,
+                     "Input: \"%s\"\nExpected error: %u\nActual result: success\n",
+                     text,
+                     static_cast<unsigned>(expected));
+    }
 
     assert(!result);
     assert(result.code == expected);
@@ -217,8 +237,7 @@ void test_reparse_after_failure()
     assert(!invalid_result);
 
     char valid[] = "{\"answer\":42}";
-    const auto valid_result =
-        json::parse(valid, std::strlen(valid), document);
+    const auto valid_result = json::parse(valid, std::strlen(valid), document);
     assert(valid_result);
     assert(document.root().is_object());
     assert(document.root().size() == 1);
