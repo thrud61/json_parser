@@ -213,7 +213,39 @@ void test_numeric_edges()
         assert(std::isfinite(document.root().as_number()));
     }
 
-    report_pass("floating-point overflow and extreme exponent handling (3 cases)");
+    {
+        char input[] = "0.00000000000000001";
+        json::document<4, 4> document;
+        const auto result = json::parse(input, sizeof(input) - 1, document);
+        assert(result);
+        assert(document.root().as_number() == 1e-17);
+    }
+
+    {
+        char input[] = "1.0000000000000000001";
+        json::document<4, 4> document;
+        const auto result = json::parse(input, sizeof(input) - 1, document);
+        assert(result);
+        assert(document.root().as_number() == 1.0);
+    }
+
+    {
+        char input[] = "0.12345678901234567";
+        json::document<4, 4> document;
+        const auto result = json::parse(input, sizeof(input) - 1, document);
+        assert(result);
+        assert(std::abs(document.root().as_number() - 0.12345678901234567) < 1e-15);
+    }
+
+    {
+        char input[] = "12345678901234567.89";
+        json::document<4, 4> document;
+        const auto result = json::parse(input, sizeof(input) - 1, document);
+        assert(result);
+        assert(document.root().as_number() == 12345678901234568.0);
+    }
+
+    report_pass("floating-point overflow, extreme exponents and precision boundaries (7 cases)");
 }
 
 void test_capacity_limits()
