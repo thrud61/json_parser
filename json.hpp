@@ -174,9 +174,9 @@ public:
      *
      * A default-constructed value, a missing object member, or an out-of-range
      * array access produces an invalid value. Test validity with
-     * @c operator_bool() before accessing the value.
+     * @c operator bool() before accessing the value.
      *
-     * @warning Accessors other than @c operator_bool() require a valid value.
+     * @warning Accessors other than @c operator bool() require a valid value.
      */
     class value
     {
@@ -668,9 +668,11 @@ private:
         }
 
         bool floating = false;
+        char* decimal_point = nullptr;
         if (current_ != end_ && *current_ == '.')
         {
             floating = true;
+            decimal_point = current_;
             ++current_;
             if (current_ == end_ || *current_ < '0' || *current_ > '9')
             {
@@ -681,6 +683,7 @@ private:
                 ++current_;
         }
 
+        char* mantissa_end = current_;
         int exponent = 0;
         bool exponent_negative = false;
         if (current_ != end_ && (*current_ == 'e' || *current_ == 'E'))
@@ -746,55 +749,44 @@ private:
             return index;
         }
 
-        double value = 0.0;
+        std::uint64_t significand = 0;
         std::size_t significant_digits = 0;
-        std::size_t fractional_digits = 0;
-        std::int64_t decimal_exponent = exponent_negative
-            ? -static_cast<std::int64_t>(exponent)
-            : static_cast<std::int64_t>(exponent);
+        std::size_t first_nonzero_position = 0;
+        std::size_t digit_position = 0;
+        int rounding_digit = -1;
+        bool nonzero_seen = false;
 
-        char* p = integer_start;
-        while (p != current_ && *p != '.' && *p != 'e' && *p != 'E')
+        for (char* p = integer_start; p != mantissa_end; ++p)
         {
+            if (*p == '.')
+                continue;
+
+            const unsigned digit = static_cast<unsigned>(*p - '0');
+            if (!nonzero_seen)
+            {
+                if (digit == 0)
+                {
+                    ++digit_position;
+                    continue;
+                }
+                nonzero_seen = true;
+                first_nonzero_position = digit_position;
+            }
+
             if (significant_digits < 17)
             {
-                value = value * 10.0 + static_cast<double>(*p - '0');
+                significand = significand * 10u + digit;
                 ++significant_digits;
             }
-            else if (decimal_exponent < 10000)
+            else if (rounding_digit < 0)
             {
-                ++decimal_exponent;
+                rounding_digit = static_cast<int>(digit);
             }
-            ++p;
+
+            ++digit_position;
         }
 
-        if (p != current_ && *p == '.')
-        {
-            ++p;
-            while (p != current_ && *p >= '0' && *p <= '9')
-            {
-                ++fractional_digits;
-                if (significant_digits < 17)
-                {
-                    value = value * 10.0 + static_cast<double>(*p - '0');
-                    ++significant_digits;
-                }
-                ++p;
-            }
-        }
-
-        if (fractional_digits > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) ||
-            (decimal_exponent < 0 &&
-             fractional_digits > static_cast<std::size_t>(
-                 std::numeric_limits<std::int64_t>::max() + decimal_exponent)))
-        {
-            last_error_ = fail(error::invalid_number);
-            return invalid_index;
-        }
-
-        decimal_exponent -= static_cast<std::int64_t>(fractional_digits);
-
-        if (value == 0.0)
+        if (!nonzero_seen)
         {
             index_type index = document_.add(value_type::number);
             if (index == invalid_index)
@@ -806,6 +798,41 @@ private:
             return index;
         }
 
+        if (rounding_digit >= 5)
+            ++significand;
+
+        std::int64_t decimal_exponent = exponent_negative
+            ? -static_cast<std::int64_t>(exponent)
+            : static_cast<std::int64_t>(exponent);
+
+        const std::size_t integer_digits = decimal_point == nullptr
+            ? static_cast<std::size_t>(mantissa_end - integer_start)
+            : static_cast<std::size_t>(decimal_point - integer_start);
+
+        if (integer_digits > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) ||
+            first_nonzero_position > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) ||
+            significant_digits > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()))
+        {
+            last_error_ = fail(error::invalid_number);
+            return invalid_index;
+        }
+
+        decimal_exponent += static_cast<std::int64_t>(integer_digits);
+        decimal_exponent -= static_cast<std::int64_t>(first_nonzero_position);
+        decimal_exponent -= static_cast<std::int64_t>(significant_digits);
+
+        if (significand >= 100000000000000000ULL)
+        {
+            significand /= 10u;
+            ++decimal_exponent;
+        }
+
+        if (decimal_exponent > 10000)
+            decimal_exponent = 10000;
+        else if (decimal_exponent < -10000)
+            decimal_exponent = -10000;
+
+        double value = static_cast<double>(significand);
         double power = 10.0;
         std::uint64_t magnitude_exponent = decimal_exponent < 0
             ? static_cast<std::uint64_t>(-decimal_exponent)
