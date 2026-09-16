@@ -809,17 +809,45 @@ private:
             ? static_cast<std::size_t>(mantissa_end - integer_start)
             : static_cast<std::size_t>(decimal_point - integer_start);
 
-        if (integer_digits > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) ||
-            first_nonzero_position > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()) ||
-            significant_digits > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max()))
+        const std::size_t max_exponent =
+            static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max());
+        if (integer_digits > max_exponent ||
+            first_nonzero_position > max_exponent ||
+            significant_digits > max_exponent)
         {
             last_error_ = fail(error::invalid_number);
             return invalid_index;
         }
 
-        decimal_exponent += static_cast<std::int64_t>(integer_digits);
-        decimal_exponent -= static_cast<std::int64_t>(first_nonzero_position);
-        decimal_exponent -= static_cast<std::int64_t>(significant_digits);
+        const auto add_exponent = [&](std::size_t amount) -> bool
+        {
+            if (amount > max_exponent)
+                return false;
+            if (decimal_exponent > 0 &&
+                amount > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max() - decimal_exponent))
+                return false;
+            decimal_exponent += static_cast<std::int64_t>(amount);
+            return true;
+        };
+
+        const auto subtract_exponent = [&](std::size_t amount) -> bool
+        {
+            if (amount > max_exponent)
+                return false;
+            if (decimal_exponent < 0 &&
+                amount > static_cast<std::size_t>(std::numeric_limits<std::int64_t>::max() + decimal_exponent))
+                return false;
+            decimal_exponent -= static_cast<std::int64_t>(amount);
+            return true;
+        };
+
+        if (!add_exponent(integer_digits) ||
+            !subtract_exponent(first_nonzero_position) ||
+            !subtract_exponent(significant_digits))
+        {
+            last_error_ = fail(error::invalid_number);
+            return invalid_index;
+        }
 
         if (significand >= 100000000000000000ULL)
         {
